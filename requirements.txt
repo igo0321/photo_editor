@@ -5,3 +5,4 @@ opencv-python-headless
 Pillow
 pdf2image
 numpy
+protobuf==3.20.3
