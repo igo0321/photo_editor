@@ -1,6 +1,6 @@
 streamlit
 streamlit-cropper
-mediapipe
+mediapipe==0.10.9
 opencv-python-headless
 Pillow
 pdf2image
