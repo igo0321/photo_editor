@@ -1,7 +1,5 @@
 streamlit==1.30.0
 streamlit-cropper
-mediapipe==0.10.9
-Pillow
+mediapipe==0.10.0
 pdf2image
-numpy
 protobuf==3.20.3
