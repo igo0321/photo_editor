@@ -237,7 +237,7 @@ if uploaded_files:
         for i, key in enumerate(keys):
             img = st.session_state['processed_images'][key]
             with cols[i % 4]:
-                st.image(img, caption=key, use_container_width=True)
+                st.image(img, caption=key, use_column_width=True)
                 if st.button(f"編集 ✏️", key=f"edit_{key}"):
                     st.session_state['editing_file'] = key
                     st.rerun()
@@ -262,4 +262,5 @@ if uploaded_files:
             data=zip_buffer.getvalue(),
             file_name="profile_photos.zip",
             mime="application/zip"
+
         )
