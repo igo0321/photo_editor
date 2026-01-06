@@ -1,0 +1,7 @@
+streamlit
+streamlit-cropper
+mediapipe
+opencv-python-headless
+Pillow
+pdf2image
+numpy
