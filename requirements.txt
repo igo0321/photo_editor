@@ -1,5 +1,7 @@
-streamlit==1.30.0
+streamlit
 streamlit-cropper
-mediapipe==0.10.0
+mediapipe
+opencv-python-headless
+Pillow
 pdf2image
-protobuf==3.20.3
+numpy
