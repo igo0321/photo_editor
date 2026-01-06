@@ -20,8 +20,9 @@ def load_image(uploaded_file):
     """ファイルを読み込みPIL Imageに変換"""
     try:
         if uploaded_file.type == "application/pdf":
-            # PDFは1ページ目を画像化
-            images = convert_from_bytes(uploaded_file.getvalue(), dpi=200, fmt='jpeg')
+            # 修正: DPIを200 -> 300に変更して画質向上（顔認識精度の改善）
+            # 300dpiあればA4サイズでも顔の輪郭がくっきりし、過剰なズームを防げます
+            images = convert_from_bytes(uploaded_file.getvalue(), dpi=300, fmt='jpeg')
             return images[0] if images else None
         else:
             image = Image.open(uploaded_file)
@@ -326,3 +327,4 @@ if st.session_state['images_data']:
         with cols[i % 4]:
             # 画像の形は指定サイズ(のアスペクト比)に統一されて表示される
             st.image(preview_img, caption=key, use_column_width=True)
+
