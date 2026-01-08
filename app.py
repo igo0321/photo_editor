@@ -5,37 +5,61 @@ import numpy as np
 import io
 import zipfile
 import os
+import gc  # メモリ掃除用
 from pdf2image import convert_from_bytes
 
 # --- ページ設定 ---
 st.set_page_config(layout="wide", page_title="Profile Photo Cropper")
 
+# --- 定数 ---
+# メモリ対策: 作業用画像の最大サイズ(長辺px)
+# 出力サイズが800px程度なら、2000pxあればズームしても十分高画質を維持でき、かつメモリを節約できる
+MAX_WORKING_SIZE = 2000 
+
 # --- 関数定義 ---
 
+def resize_if_huge(image):
+    """画像が巨大すぎる場合、アスペクト比を維持してリサイズする"""
+    w, h = image.size
+    max_dim = max(w, h)
+    if max_dim > MAX_WORKING_SIZE:
+        scale = MAX_WORKING_SIZE / max_dim
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    return image
+
 def load_image(uploaded_file):
-    """ファイルを読み込みPIL Imageに変換"""
+    """ファイルを読み込みPIL Imageに変換 (メモリ対策込み)"""
     try:
+        image = None
         if uploaded_file.type == "application/pdf":
             # PDFは300dpiで変換して顔認識精度を確保
             images = convert_from_bytes(uploaded_file.getvalue(), dpi=300, fmt='jpeg')
-            return images[0] if images else None
+            if images:
+                image = images[0]
         else:
             image = Image.open(uploaded_file)
             image = ImageOps.exif_transpose(image) # 回転補正
+        
+        if image:
+            # ここで巨大画像をリサイズしてメモリ爆発を防ぐ
+            image = resize_if_huge(image)
             return image
+        return None
     except Exception as e:
         st.error(f"Error loading {uploaded_file.name}: {e}")
         return None
 
 def analyze_face_coordinates(image, confidence_threshold):
-    """
-    指定された感度(confidence)で顔検出を行う
-    """
+    """指定された感度(confidence)で顔検出を行う"""
     mp_face_detection = mp.solutions.face_detection
-    # 指定された閾値でモデルを初期化
     with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=confidence_threshold) as face_detection:
         img_np = np.array(image.convert('RGB'))
         results = face_detection.process(img_np)
+        
+        # メモリ開放
+        del img_np
         
         if not results.detections:
             return None
@@ -44,7 +68,6 @@ def analyze_face_coordinates(image, confidence_threshold):
         bbox = detection.location_data.relative_bounding_box
         kps = detection.location_data.relative_keypoints
         
-        # 目の中心位置
         right_eye = kps[0]
         left_eye = kps[1]
         eye_center_x = (right_eye.x + left_eye.x) / 2
@@ -70,7 +93,6 @@ def create_smart_cropped_image(original_img, face_data, target_w, target_h, face
         crop_cy = crop_top + (crop_h / 2)
         crop_cx = face_data['face_cx'] * img_w
     else:
-        # 顔なし救済：中心切り抜き
         crop_h = img_h * 0.8
         crop_cx, crop_cy = img_w / 2, img_h / 2
 
@@ -90,7 +112,6 @@ def create_smart_cropped_image(original_img, face_data, target_w, target_h, face
     needs_padding = False
     
     if has_overflow:
-        # Shift
         if crop_w <= img_w:
             if final_x1 < 0:
                 offset = -final_x1
@@ -110,7 +131,6 @@ def create_smart_cropped_image(original_img, face_data, target_w, target_h, face
                 final_y1 -= offset
                 final_y2 -= offset
 
-        # Zoom check
         scale_w = img_w / crop_w if crop_w > img_w else 1.0
         scale_h = img_h / crop_h if crop_h > img_h else 1.0
         min_scale = min(scale_w, scale_h)
@@ -157,11 +177,12 @@ st.sidebar.title("設定")
 # 0. メモリ開放ボタン
 if st.sidebar.button("🗑️ データをリセット", help="アップロードした画像を全てクリアします"):
     st.session_state['images_data'] = {}
+    gc.collect() # 強制メモリ掃除
     st.rerun()
 
 st.sidebar.markdown("---")
 
-# 1. 顔認識設定 (New!)
+# 1. 顔認識設定
 st.sidebar.subheader("① 顔認識の精度")
 confidence_val = st.sidebar.slider(
     "検出感度 (低いほど検出しやすい)", 
@@ -169,7 +190,7 @@ confidence_val = st.sidebar.slider(
     help="顔が認識されない場合は値を下げてみてください。"
 )
 
-# 感度が変更された場合、全画像を再解析するロジック
+# 感度が変更された場合
 if abs(confidence_val - st.session_state['last_detection_confidence']) > 0.001:
     if st.session_state['images_data']:
         with st.spinner("新しい感度で顔を再検出中..."):
@@ -177,6 +198,7 @@ if abs(confidence_val - st.session_state['last_detection_confidence']) > 0.001:
                 img = st.session_state['images_data'][key]['original']
                 new_face_data = analyze_face_coordinates(img, confidence_val)
                 st.session_state['images_data'][key]['face_data'] = new_face_data
+            gc.collect() # 処理後に掃除
     st.session_state['last_detection_confidence'] = confidence_val
     st.rerun()
 
@@ -199,8 +221,7 @@ bg_mode = st.sidebar.radio("背景色", ["白", "黒"], horizontal=True)
 
 st.sidebar.markdown("---")
 
-# 5. ダウンロードボタン配置用プレースホルダー (New!)
-# ここに空箱を置いておき、メイン処理の最後でボタンを注入する
+# 5. ダウンロードボタン配置用プレースホルダー
 download_placeholder = st.sidebar.empty()
 
 
@@ -213,16 +234,28 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
     new_count = 0
-    for up_file in uploaded_files:
+    # プログレスバーを表示（大量アップロード時のフリーズ防止感）
+    progress_text = "画像を読み込み中..."
+    my_bar = st.progress(0, text=progress_text)
+    
+    total_files = len(uploaded_files)
+    
+    for i, up_file in enumerate(uploaded_files):
         fname = os.path.splitext(up_file.name)[0]
         if fname not in st.session_state['images_data']:
             img = load_image(up_file)
             if img:
                 if img.mode != "RGB": img = img.convert("RGB")
-                # 現在の感度設定で解析
                 face_data = analyze_face_coordinates(img, confidence_val)
                 st.session_state['images_data'][fname] = {'original': img, 'face_data': face_data}
                 new_count += 1
+        
+        # 進捗更新
+        my_bar.progress((i + 1) / total_files, text=f"読み込み中... {i+1}/{total_files}")
+    
+    my_bar.empty()
+    gc.collect() # 読み込み完了後に一回掃除
+    
     if new_count > 0:
         st.success(f"{new_count} 枚追加しました")
 
@@ -241,8 +274,7 @@ if st.session_state['images_data']:
         with cols[i % 4]:
             st.image(preview_img, caption=key, use_column_width=True)
 
-    # --- ダウンロードボタンの表示 (New!) ---
-    # プレビュー表示が終わった時点でサイドバーのプレースホルダーにボタンを表示
+    # --- ダウンロードボタン ---
     with download_placeholder.container():
         st.subheader("⑤ 出力")
         if st.button("📦 画像を作成してダウンロード", type="primary"):
@@ -262,11 +294,17 @@ if st.session_state['images_data']:
                     final_img.save(img_byte_arr, format='JPEG', quality=95)
                     zf.writestr(f"{fname}.jpg", img_byte_arr.getvalue())
                     progress_bar.progress((i + 1) / total)
+                    
+                    # 1枚ごとにメモリ掃除
+                    del final_img
+                    del img_byte_arr
+                    if i % 5 == 0: gc.collect()
             
             progress_bar.empty()
             status_text.empty()
-            st.success("作成完了！下のボタンから保存してください")
+            gc.collect()
             
+            st.success("作成完了！下のボタンから保存してください")
             st.download_button(
                 label="ZIPファイルを保存",
                 data=zip_buffer.getvalue(),
@@ -274,5 +312,4 @@ if st.session_state['images_data']:
                 mime="application/zip"
             )
 else:
-    # 画像がない場合はダウンロード欄にメッセージだけ出しておく
     download_placeholder.info("画像をアップロードするとダウンロードボタンが表示されます")
