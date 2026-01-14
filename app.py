@@ -13,7 +13,6 @@ st.set_page_config(layout="wide", page_title="Profile Photo Cropper")
 
 # --- 定数 ---
 # メモリ対策: 作業用画像の最大サイズ(長辺px)
-# 出力サイズが800px程度なら、2000pxあればズームしても十分高画質を維持でき、かつメモリを節約できる
 MAX_WORKING_SIZE = 2000 
 
 # --- 関数定義 ---
@@ -39,11 +38,12 @@ def load_image(uploaded_file):
             if images:
                 image = images[0]
         else:
+            # TIFF, BMP, WebPなどもここでPillowが自動判別して開く
             image = Image.open(uploaded_file)
             image = ImageOps.exif_transpose(image) # 回転補正
         
         if image:
-            # ここで巨大画像をリサイズしてメモリ爆発を防ぐ
+            # 巨大画像をリサイズしてメモリ爆発を防ぐ
             image = resize_if_huge(image)
             return image
         return None
@@ -58,7 +58,6 @@ def analyze_face_coordinates(image, confidence_threshold):
         img_np = np.array(image.convert('RGB'))
         results = face_detection.process(img_np)
         
-        # メモリ開放
         del img_np
         
         if not results.detections:
@@ -177,7 +176,7 @@ st.sidebar.title("設定")
 # 0. メモリ開放ボタン
 if st.sidebar.button("🗑️ データをリセット", help="アップロードした画像を全てクリアします"):
     st.session_state['images_data'] = {}
-    gc.collect() # 強制メモリ掃除
+    gc.collect() 
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -190,7 +189,6 @@ confidence_val = st.sidebar.slider(
     help="顔が認識されない場合は値を下げてみてください。"
 )
 
-# 感度が変更された場合
 if abs(confidence_val - st.session_state['last_detection_confidence']) > 0.001:
     if st.session_state['images_data']:
         with st.spinner("新しい感度で顔を再検出中..."):
@@ -198,7 +196,7 @@ if abs(confidence_val - st.session_state['last_detection_confidence']) > 0.001:
                 img = st.session_state['images_data'][key]['original']
                 new_face_data = analyze_face_coordinates(img, confidence_val)
                 st.session_state['images_data'][key]['face_data'] = new_face_data
-            gc.collect() # 処理後に掃除
+            gc.collect()
     st.session_state['last_detection_confidence'] = confidence_val
     st.rerun()
 
@@ -228,13 +226,15 @@ download_placeholder = st.sidebar.empty()
 # --- メイン画面 ---
 st.title("プロフィール写真 自動クロッパー")
 
+# 対応フォーマットを追加 (tiff, tif, bmp, webp)
 uploaded_files = st.file_uploader(
-    "画像をドラッグ＆ドロップ", type=['jpg', 'jpeg', 'png', 'pdf'], accept_multiple_files=True
+    "画像をドラッグ＆ドロップ", 
+    type=['jpg', 'jpeg', 'png', 'pdf', 'tiff', 'tif', 'bmp', 'webp'], 
+    accept_multiple_files=True
 )
 
 if uploaded_files:
     new_count = 0
-    # プログレスバーを表示（大量アップロード時のフリーズ防止感）
     progress_text = "画像を読み込み中..."
     my_bar = st.progress(0, text=progress_text)
     
@@ -250,11 +250,10 @@ if uploaded_files:
                 st.session_state['images_data'][fname] = {'original': img, 'face_data': face_data}
                 new_count += 1
         
-        # 進捗更新
         my_bar.progress((i + 1) / total_files, text=f"読み込み中... {i+1}/{total_files}")
     
     my_bar.empty()
-    gc.collect() # 読み込み完了後に一回掃除
+    gc.collect() 
     
     if new_count > 0:
         st.success(f"{new_count} 枚追加しました")
@@ -295,7 +294,6 @@ if st.session_state['images_data']:
                     zf.writestr(f"{fname}.jpg", img_byte_arr.getvalue())
                     progress_bar.progress((i + 1) / total)
                     
-                    # 1枚ごとにメモリ掃除
                     del final_img
                     del img_byte_arr
                     if i % 5 == 0: gc.collect()
